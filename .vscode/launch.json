@@ -1,0 +1,1 @@
+{ "version": "0.2.0", "configurations": [ { "name": "Run fintech pipeline", "type": "python", "request": "launch", "program": "${workspaceFolder}/process_data_fintech.py", "console": "integratedTerminal", "args": [ "--raw", "1 Raw Data.xlsx", "--ct_template", "2 CT Analysis.xlsx", "--tus_template", "3 TUS Analysis.xlsx", "--out_dir", "outputs", "--version", "0.1.0" ] } ] }
