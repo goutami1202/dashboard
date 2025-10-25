@@ -3,6 +3,19 @@ import os, subprocess, uuid, logging
 from werkzeug.utils import secure_filename
 from pathlib import Path
 
+# add near top of web_app.py
+import sys, traceback, atexit
+def global_exception_handler(exc_type, exc, tb):
+    msg = "".join(traceback.format_exception(exc_type, exc, tb))
+    print("UNCAUGHT EXCEPTION:\n", msg, file=sys.stderr)
+    try:
+        with open("outputs/uncaught_startup_error.log","a") as f:
+            f.write(msg+"\n")
+    except Exception:
+        pass
+
+sys.excepthook = global_exception_handler
+
 UPLOAD_FOLDER = "uploads"
 OUTPUT_FOLDER = "outputs"
 ALLOWED_EXT = {".csv", ".xlsx", ".xls"}
