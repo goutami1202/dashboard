@@ -17,9 +17,10 @@ USER app
 
 ENV FLASK_APP=web_app.py
 EXPOSE 5000
+ENV PORT=5000
 
 # create runtime folders
 RUN mkdir -p /home/app/uploads /home/app/outputs
 
 #ENTRYPOINT ["python", "web_app.py"]
-CMD ["sh", "-c", "gunicorn -w 1 -b 0.0.0.0:${PORT:5000} web_app:app --timeout 300 --log-level info"]
+CMD ["sh", "-c", "gunicorn -w 1 -b 0.0.0.0:$PORT web_app:app --timeout 300 --log-level info"]
