@@ -369,7 +369,7 @@ INDEX_HTML = """
                     Dashboard preview
                     {% endif %}
                 </p>
-                <iframe src="/view/{{ dashboard }}"></iframe>
+                <iframe src="/view/{{ dashboard }}" style="width: 100%; height: 600px; border: none; border-radius: 8px;"></iframe>
                 <div style="text-align: center; margin-top: 15px;">
                     <a href="/view/{{ dashboard }}" class="btn" target="_blank">Open in New Tab</a>
                     <a href="/outputs/{{ dashboard }}" class="btn btn-success">Download Dashboard</a>
@@ -408,6 +408,15 @@ INDEX_HTML = """
             document.getElementById('loading').style.display = 'block';
             document.getElementById('uploadButton').disabled = true;
             document.getElementById('uploadButton').textContent = 'Processing...';
+            
+            // Reset form after successful submission (prevent stuck state)
+            setTimeout(function() {
+                document.getElementById('uploadForm').reset();
+                document.getElementById('fileName').textContent = '';
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('uploadButton').disabled = false;
+                document.getElementById('uploadButton').textContent = 'Upload & Process';
+            }, 2000);
         });
 
         // Auto-refresh job status every 5 seconds
@@ -764,6 +773,15 @@ def download_output(filename):
     safe = os.path.join(app.config["OUTPUT_FOLDER"], filename)
     if not os.path.exists(safe):
         abort(404)
+    return send_from_directory(app.config["OUTPUT_FOLDER"], filename, as_attachment=True)
+
+
+@app.route("/serve/<path:filename>")
+def serve_file(filename):
+    """Serve file content without forcing download"""
+    safe = os.path.join(app.config["OUTPUT_FOLDER"], filename)
+    if not os.path.exists(safe):
+        abort(404)
     return send_from_directory(app.config["OUTPUT_FOLDER"], filename, as_attachment=False)
 
 
@@ -774,14 +792,15 @@ def view_dashboard(filename):
         abort(404)
     if not filename.endswith(".html"):
         return redirect(url_for("download_output", filename=filename))
-    wrapper = f"""
-    <!doctype html>
-    <title>Dashboard: {filename}</title>
-    <h3>Dashboard: {filename}</h3>
-    <div><a href="{url_for('index')}">&larr; Back</a> | <a href="{url_for('download_output', filename=filename)}">Download</a></div>
-    <iframe src="{url_for('download_output', filename=filename)}" style="width:100%;height:85vh;border:0;"></iframe>
-    """
-    return wrapper
+    
+    # Read the HTML content directly
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+        return html_content
+    except Exception as e:
+        logger.exception("Error reading dashboard file: %s", e)
+        abort(500)
 
 
 # ----------------------
