@@ -423,6 +423,15 @@ INDEX_HTML = """
     </div>
 
     <script>
+        // Reset form on page load to ensure clean state
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('uploadForm').reset();
+            document.getElementById('fileName').textContent = '';
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('uploadButton').disabled = false;
+            document.getElementById('uploadButton').textContent = 'Upload & Process';
+        });
+
         // File input handling
         document.getElementById('fileInput').addEventListener('change', function(e) {
             const fileName = e.target.files[0]?.name || 'No file chosen';
@@ -645,15 +654,60 @@ def worker_thread():
             ct_path = os.path.join(OUTPUT_FOLDER, ct_output)
             tus_path = os.path.join(OUTPUT_FOLDER, tus_output)
             
+            logger.info("Job %s: Checking for output files - CT: %s, TUS: %s", job_id, ct_path, tus_path)
+            
             if os.path.exists(ct_path):
                 output_files.append(ct_output)
+                logger.info("Job %s: Found CT output file: %s", job_id, ct_output)
+            else:
+                logger.warning("Job %s: CT output file not found: %s", job_id, ct_path)
+                
             if os.path.exists(tus_path):
                 output_files.append(tus_output)
+                logger.info("Job %s: Found TUS output file: %s", job_id, tus_output)
+            else:
+                logger.warning("Job %s: TUS output file not found: %s", job_id, tus_path)
             
             # Check for any HTML dashboard files generated
-            for file in os.listdir(OUTPUT_FOLDER):
-                if file.endswith('.html') and job_id in file:
-                    output_files.append(file)
+            try:
+                for file in os.listdir(OUTPUT_FOLDER):
+                    if file.endswith('.html') and job_id in file:
+                        output_files.append(file)
+                        logger.info("Job %s: Found HTML dashboard: %s", job_id, file)
+            except Exception as e:
+                logger.exception("Job %s: Error listing output directory: %s", job_id, e)
+            
+            # Fallback: if no custom files found, check for default output files
+            if not output_files:
+                logger.info("Job %s: No custom output files found, checking for default files", job_id)
+                default_ct = "CT_Analysis_Output.csv"
+                default_tus = "TUS_Analysis_Output.csv"
+                default_ct_path = os.path.join(OUTPUT_FOLDER, default_ct)
+                default_tus_path = os.path.join(OUTPUT_FOLDER, default_tus)
+                
+                if os.path.exists(default_ct_path):
+                    # Create a copy with job_id to make it unique
+                    unique_ct = f"{original_filename}_{job_id}_CT_Analysis_Output.csv"
+                    unique_ct_path = os.path.join(OUTPUT_FOLDER, unique_ct)
+                    try:
+                        import shutil
+                        shutil.copy2(default_ct_path, unique_ct_path)
+                        output_files.append(unique_ct)
+                        logger.info("Job %s: Copied default CT file to: %s", job_id, unique_ct)
+                    except Exception as e:
+                        logger.exception("Job %s: Error copying CT file: %s", job_id, e)
+                
+                if os.path.exists(default_tus_path):
+                    # Create a copy with job_id to make it unique
+                    unique_tus = f"{original_filename}_{job_id}_TUS_Analysis_Output.csv"
+                    unique_tus_path = os.path.join(OUTPUT_FOLDER, unique_tus)
+                    try:
+                        import shutil
+                        shutil.copy2(default_tus_path, unique_tus_path)
+                        output_files.append(unique_tus)
+                        logger.info("Job %s: Copied default TUS file to: %s", job_id, unique_tus)
+                    except Exception as e:
+                        logger.exception("Job %s: Error copying TUS file: %s", job_id, e)
 
             # success
             safe_set_job(job_id, status="done", finished_at=datetime.utcnow().isoformat(), output_files=output_files)
