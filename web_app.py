@@ -98,64 +98,304 @@ INDEX_HTML = """
 <html>
 <head>
     <title>FinTech Dashboard</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body { font-family: Arial, sans-serif; margin: 40px; }
-        .upload-form { border: 2px dashed #ccc; padding: 20px; margin: 20px 0; }
-        .outputs { margin: 20px 0; }
-        .job-status { background: #f5f5f5; padding: 10px; margin: 10px 0; }
-        .success { color: green; }
-        .error { color: red; }
+        * { box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            margin: 0; 
+            padding: 20px; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 2.5em;
+            font-weight: 300;
+        }
+        .content {
+            padding: 30px;
+        }
+        .upload-form { 
+            border: 3px dashed #3498db; 
+            padding: 40px; 
+            margin: 30px 0; 
+            text-align: center;
+            border-radius: 10px;
+            background: #f8f9fa;
+            transition: all 0.3s ease;
+        }
+        .upload-form:hover {
+            border-color: #2980b9;
+            background: #e3f2fd;
+        }
+        .file-input-wrapper {
+            position: relative;
+            display: inline-block;
+            margin: 20px 0;
+        }
+        .file-input {
+            position: absolute;
+            opacity: 0;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+        }
+        .file-input-button {
+            background: #3498db;
+            color: white;
+            padding: 15px 30px;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background 0.3s ease;
+        }
+        .file-input-button:hover {
+            background: #2980b9;
+        }
+        .file-name {
+            margin: 10px 0;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .upload-button {
+            background: #27ae60;
+            color: white;
+            padding: 15px 40px;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 20px 0;
+            transition: background 0.3s ease;
+        }
+        .upload-button:hover {
+            background: #229954;
+        }
+        .upload-button:disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
+        }
+        .outputs, .job-status { 
+            margin: 30px 0; 
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+        }
+        .job-status { 
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+        }
+        .success { color: #27ae60; font-weight: bold; }
+        .error { color: #e74c3c; font-weight: bold; }
+        .queued { color: #f39c12; font-weight: bold; }
+        .running { color: #3498db; font-weight: bold; }
+        .job-item {
+            background: white;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .output-item {
+            background: white;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .btn {
+            background: #3498db;
+            color: white;
+            padding: 8px 16px;
+            text-decoration: none;
+            border-radius: 5px;
+            font-size: 14px;
+            transition: background 0.3s ease;
+        }
+        .btn:hover {
+            background: #2980b9;
+        }
+        .btn-success {
+            background: #27ae60;
+        }
+        .btn-success:hover {
+            background: #229954;
+        }
+        .dashboard-viewer {
+            margin: 30px 0;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        .dashboard-viewer iframe {
+            width: 100%;
+            height: 600px;
+            border: none;
+        }
+        .health-check {
+            text-align: center;
+            margin: 30px 0;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
-    <h1>FinTech Data Processing Dashboard</h1>
-    
-    <div class="upload-form">
-        <h3>Upload Data File</h3>
-        <form action="/upload" method="post" enctype="multipart/form-data">
-            <input type="file" name="file" accept=".csv,.xlsx,.xls" required>
-            <button type="submit">Upload & Process</button>
-        </form>
-        <p>Supported formats: CSV, Excel (.xlsx, .xls)</p>
-    </div>
-
-    {% if jobs %}
-    <div class="job-status">
-        <h3>Recent Jobs</h3>
-        {% for job in jobs %}
-        <div>
-            <a href="/job-page/{{ job.job_id }}">Job {{ job.job_id }}</a> - 
-            <span class="{% if job.status == 'done' %}success{% elif job.status == 'failed' %}error{% endif %}">
-                {{ job.status }}
-            </span>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 FinTech Data Processing Dashboard</h1>
+            <p>Upload your financial data and generate interactive dashboards</p>
         </div>
-        {% endfor %}
-    </div>
-    {% endif %}
+        
+        <div class="content">
+            <div class="upload-form">
+                <h3>📁 Upload Data File</h3>
+                <form id="uploadForm" action="/upload" method="post" enctype="multipart/form-data">
+                    <div class="file-input-wrapper">
+                        <input type="file" id="fileInput" name="file" class="file-input" accept=".csv,.xlsx,.xls" required>
+                        <button type="button" class="file-input-button" onclick="document.getElementById('fileInput').click()">
+                            Choose File
+                        </button>
+                    </div>
+                    <div id="fileName" class="file-name"></div>
+                    <button type="submit" class="upload-button" id="uploadButton">
+                        Upload & Process
+                    </button>
+                </form>
+                <p>📋 Supported formats: CSV, Excel (.xlsx, .xls)</p>
+                <div id="loading" class="loading">
+                    <div class="spinner"></div>
+                    <p>Processing your file...</p>
+                </div>
+            </div>
 
-    {% if outputs %}
-    <div class="outputs">
-        <h3>Available Dashboards</h3>
-        {% for output in outputs %}
-        <div>
-            <a href="/view/{{ output }}">{{ output }}</a> | 
-            <a href="/outputs/{{ output }}">Download</a>
+            {% if jobs %}
+            <div class="job-status">
+                <h3>⚡ Recent Jobs</h3>
+                {% for job in jobs %}
+                <div class="job-item">
+                    <div>
+                        <strong>Job {{ job.job_id }}</strong>
+                        <span class="{% if job.status == 'done' %}success{% elif job.status == 'failed' %}error{% elif job.status == 'queued' %}queued{% elif job.status == 'running' %}running{% endif %}">
+                            {{ job.status|title }}
+                        </span>
+                    </div>
+                    <a href="/job-page/{{ job.job_id }}" class="btn">View Details</a>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if outputs %}
+            <div class="outputs">
+                <h3>📊 Available Dashboards</h3>
+                {% for output in outputs %}
+                <div class="output-item">
+                    <div>
+                        <strong>{{ output }}</strong>
+                        {% if output.endswith('.html') %}
+                        <span style="color: #27ae60;">📈 Dashboard</span>
+                        {% else %}
+                        <span style="color: #3498db;">📄 Data File</span>
+                        {% endif %}
+                    </div>
+                    <div>
+                        {% if output.endswith('.html') %}
+                        <a href="/view/{{ output }}" class="btn">View</a>
+                        {% endif %}
+                        <a href="/outputs/{{ output }}" class="btn btn-success">Download</a>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if dashboard %}
+            <div class="dashboard-viewer">
+                <h3>📈 Current Dashboard: {{ dashboard }}</h3>
+                <iframe src="/view/{{ dashboard }}"></iframe>
+            </div>
+            {% endif %}
+
+            <div class="health-check">
+                <h3>🔍 System Status</h3>
+                <a href="/health" class="btn">Check Application Health</a>
+            </div>
         </div>
-        {% endfor %}
     </div>
-    {% endif %}
 
-    {% if dashboard %}
-    <div>
-        <h3>Current Dashboard: {{ dashboard }}</h3>
-        <iframe src="/view/{{ dashboard }}" width="100%" height="600px"></iframe>
-    </div>
-    {% endif %}
+    <script>
+        // File input handling
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const fileName = e.target.files[0]?.name || 'No file chosen';
+            document.getElementById('fileName').textContent = fileName;
+            
+            if (e.target.files[0]) {
+                document.getElementById('uploadButton').disabled = false;
+            }
+        });
 
-    <div>
-        <h3>Health Check</h3>
-        <a href="/health">Check Application Health</a>
-    </div>
+        // Form submission handling
+        document.getElementById('uploadForm').addEventListener('submit', function(e) {
+            const fileInput = document.getElementById('fileInput');
+            if (!fileInput.files[0]) {
+                e.preventDefault();
+                alert('Please select a file first!');
+                return;
+            }
+            
+            // Show loading spinner
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('uploadButton').disabled = true;
+            document.getElementById('uploadButton').textContent = 'Processing...';
+        });
+
+        // Auto-refresh job status every 5 seconds
+        setInterval(function() {
+            if (document.querySelector('.job-status')) {
+                location.reload();
+            }
+        }, 5000);
+    </script>
 </body>
 </html>
 """
