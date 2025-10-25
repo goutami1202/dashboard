@@ -1,0 +1,32 @@
+name: CI-Fintech
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+jobs:
+  lint-test-security-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.11
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements_fintech.txt
+          pip install ruff bandit
+      - name: Lint (ruff)
+        run: |
+          ruff check .
+      - name: Security scan (bandit)
+        run: |
+          bandit -r . -q
+      - name: Run tests
+        run: |
+          pytest -q
+      - name: Build Docker image
+        run: |
+          docker build -t raw2analysis:latest .

@@ -1,0 +1,9 @@
+FROM python:3.11-slim
+RUN groupadd -r app && useradd -r -g app app
+WORKDIR /home/app
+COPY requirements_fintech.txt /home/app/requirements_fintech.txt
+RUN pip install --no-cache-dir -r requirements_fintech.txt
+COPY . /home/app
+RUN chown -R app:app /home/app
+USER app
+ENTRYPOINT ["python", "process_data_fintech.py"] 
