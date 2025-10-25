@@ -166,6 +166,10 @@ INDEX_HTML = """
 </body>
 </html>
 """
+@app.route("/")
+def home():
+    return "" \
+    "Fintech Dashboard Backen is running Successfully", 200
 
 @app.route("/health")
 def health():
