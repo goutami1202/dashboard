@@ -3,10 +3,15 @@
 web_app.py
 
 Flask web UI + background processing for Fintech dashboard project.
-- Upload a CSV/XLSX
-- Preprocess (optional) via preprocess_upload.py
-- Background-run process_data_fintech.py and generate_dashboard.py
-- Serve outputs and dashboard inline
+
+Features:
+- env-backed SECRET_KEY and PORT handling
+- detailed logging
+- /health endpoint
+- single background worker (only started in one Gunicorn worker or in dev)
+- job queue with status endpoint
+- optional preprocessing via preprocess_upload.py
+- safe download/view endpoints and dashboard embedding
 """
 
 import os
@@ -52,10 +57,11 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s - %(message)s",
 )
 logger = logging.getLogger("fintech_web_app")
-logger.info("web_app starting; PORT=%s", os.environ.get("PORT"))
+logger.info("web_app module import; PORT=%s GUNICORN_WORKER_ID=%s",
+            os.environ.get("PORT"), os.environ.get("GUNICORN_WORKER_ID"))
 
 # ----------------------
-# Simple in-memory job store + worker queue
+# In-memory job store + worker queue
 # ----------------------
 processing_queue = Queue()
 jobs = {}  # job_id -> metadata dict
@@ -78,14 +84,14 @@ def worker_thread():
     Each job is a tuple (job_id, uploaded_path).
     It runs: process_data_fintech.py then generate_dashboard.py
     """
-    logger.info("Background worker started")
+    logger.info("Background worker thread started (worker process)")
     while True:
         job = processing_queue.get()
         if job is None:
             logger.info("Worker received shutdown signal")
             break
         job_id, uploaded_path = job
-        safe_set_job(job_id, status="running", started_at=datetime.utcnow().isoformat())
+        safe_set_job(job_id, status="running", started_at=datetime.utcnow().isoformat(), uploaded_path=uploaded_path)
         logger.info("Job %s: starting processing for %s", job_id, uploaded_path)
 
         try:
@@ -115,20 +121,45 @@ def worker_thread():
             safe_set_job(job_id, status="done", finished_at=datetime.utcnow().isoformat())
             logger.info("Job %s: completed successfully", job_id)
         except subprocess.TimeoutExpired as t:
-            logger.exception("Job %s: subprocess timeout", job_id)
+            logger.exception("Job %s: subprocess timeout: %s", job_id, t)
             safe_set_job(job_id, status="failed", finished_at=datetime.utcnow().isoformat(), error=f"timeout: {t}")
         except Exception as e:
-            logger.exception("Job %s: unexpected error", job_id)
+            logger.exception("Job %s: unexpected error: %s", job_id, e)
             safe_set_job(job_id, status="error", finished_at=datetime.utcnow().isoformat(), error=str(e))
         finally:
             processing_queue.task_done()
 
 
-# Start worker daemon thread
-threading.Thread(target=worker_thread, daemon=True).start()
+# ----------------------
+# Start background worker once (safe for Gunicorn multi-worker)
+# ----------------------
+def start_background_worker_once():
+    """
+    Start background worker thread only in one process:
+    - If running under Gunicorn, only start in worker id 1 (GUNICORN_WORKER_ID == '1')
+    - Otherwise (dev) start normally.
+    """
+    worker_id = os.environ.get("GUNICORN_WORKER_ID")
+    if worker_id is None:
+        # not running under gunicorn (local dev), start worker
+        threading.Thread(target=worker_thread, daemon=True).start()
+        logger.info("Background worker started (dev mode)")
+    else:
+        try:
+            if int(worker_id) == 1:
+                threading.Thread(target=worker_thread, daemon=True).start()
+                logger.info("Background worker started in Gunicorn worker 1")
+            else:
+                logger.info("Not starting background worker in worker id %s", worker_id)
+        except Exception:
+            logger.exception("Could not parse GUNICORN_WORKER_ID; not starting background worker")
+
+
+# Call once at import time (safe; will only actually start worker in correct process)
+start_background_worker_once()
 
 # ----------------------
-# Routes & helpers
+# HTML template
 # ----------------------
 INDEX_HTML = """
 <!doctype html>
@@ -237,7 +268,9 @@ INDEX_HTML = """
 </html>
 """
 
-
+# ----------------------
+# Routes & helpers
+# ----------------------
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"}), 200
@@ -245,10 +278,8 @@ def health():
 
 @app.route("/", methods=["GET"])
 def index():
-    # show latest dashboard if present
     dashboard = request.args.get("dashboard", default=None)
     outputs = sorted(os.listdir(app.config["OUTPUT_FOLDER"])) if os.path.exists(app.config["OUTPUT_FOLDER"]) else []
-    # prepare jobs list for UI
     with jobs_lock:
         jobs_list = [
             {"job_id": k, "status": v.get("status", "unknown")}
@@ -321,7 +352,6 @@ def job_status_page(job_id):
     info = safe_get_job(job_id)
     if not info:
         abort(404)
-    # Small HTML page: show basic job info and logs
     html = "<h3>Job {}</h3><pre>{}</pre><p><a href='/'>Back</a></p>".format(job_id, "\n".join(f"{k}: {v}" for k, v in info.items()))
     return html
 
@@ -331,7 +361,6 @@ def download_output(filename):
     safe = os.path.join(app.config["OUTPUT_FOLDER"], filename)
     if not os.path.exists(safe):
         abort(404)
-    # Serve inline (not forced attachment) so dashboards can be embedded
     return send_from_directory(app.config["OUTPUT_FOLDER"], filename, as_attachment=False)
 
 
@@ -364,5 +393,4 @@ def shutdown_worker():
 # ----------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    # NEVER enable debug in production
     app.run(host="0.0.0.0", port=port, debug=False)
