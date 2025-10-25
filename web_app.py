@@ -90,6 +90,81 @@ processing_queue = Queue()
 jobs = {}
 jobs_lock = threading.Lock()
 
+# ----------------------
+# Start background worker
+# ----------------------
+start_background_worker_once_with_pidfile()
+
+# ----------------------
+# HTML Template
+# ----------------------
+INDEX_HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>FinTech Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .upload-form { border: 2px dashed #ccc; padding: 20px; margin: 20px 0; }
+        .outputs { margin: 20px 0; }
+        .job-status { background: #f5f5f5; padding: 10px; margin: 10px 0; }
+        .success { color: green; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <h1>FinTech Data Processing Dashboard</h1>
+    
+    <div class="upload-form">
+        <h3>Upload Data File</h3>
+        <form action="/upload" method="post" enctype="multipart/form-data">
+            <input type="file" name="file" accept=".csv,.xlsx,.xls" required>
+            <button type="submit">Upload & Process</button>
+        </form>
+        <p>Supported formats: CSV, Excel (.xlsx, .xls)</p>
+    </div>
+
+    {% if jobs %}
+    <div class="job-status">
+        <h3>Recent Jobs</h3>
+        {% for job in jobs %}
+        <div>
+            <a href="/job-page/{{ job.job_id }}">Job {{ job.job_id }}</a> - 
+            <span class="{% if job.status == 'done' %}success{% elif job.status == 'failed' %}error{% endif %}">
+                {{ job.status }}
+            </span>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if outputs %}
+    <div class="outputs">
+        <h3>Available Dashboards</h3>
+        {% for output in outputs %}
+        <div>
+            <a href="/view/{{ output }}">{{ output }}</a> | 
+            <a href="/outputs/{{ output }}">Download</a>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if dashboard %}
+    <div>
+        <h3>Current Dashboard: {{ dashboard }}</h3>
+        <iframe src="/view/{{ dashboard }}" width="100%" height="600px"></iframe>
+    </div>
+    {% endif %}
+
+    <div>
+        <h3>Health Check</h3>
+        <a href="/health">Check Application Health</a>
+    </div>
+</body>
+</html>
+"""
+
 
 def safe_set_job(job_id, **kwargs):
     with jobs_lock:
