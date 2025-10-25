@@ -1,86 +1,117 @@
-import pandas as pd
-import numpy as np
-from pathlib import Path
-from datetime import datetime, timedelta
+#!/usr/bin/env python3
+"""
+preprocess_upload.py
+Automatically cleans, normalizes, and fills required columns for the FinTech Dashboard pipeline.
+Ensures columns like Date_Time, Result, and PCode always exist.
+"""
+
 import sys
+import os
+import pandas as pd
+from pathlib import Path
 
-def read_any(path):
-    ext = Path(path).suffix.lower()
-    if ext in (".xls", ".xlsx"):
-        return pd.read_excel(path, engine="openpyxl")
-    return pd.read_csv(path, low_memory=False)
+# Columns your pipeline expects — add here if new ones appear later
+REQUIRED_COLUMNS = ["Date_Time", "Result", "PCode"]
 
-def find_column(df, keywords):
-    for c in df.columns:
-        name = str(c).strip().lower().replace(" ", "_")
-        for key in keywords:
-            if key in name:
-                return c
-    return None
-
-def normalize_any_file(path):
-    df = read_any(path)
-    df = df.copy()
-    df.columns = [str(c).strip() for c in df.columns]
-
-    # --- Detect core columns ---
-    date_col = find_column(df, ["date", "time", "timestamp", "datetime", "recorded"])
-    station_col = find_column(df, ["station", "id", "branch", "location", "sensor"])
-    result_col = find_column(df, ["value", "amount", "result", "reading", "score", "price", "metric"])
-
-    # --- Create base DataFrame ---
-    if date_col:
-        try:
-            df["Date_Time"] = pd.to_datetime(df[date_col], errors="coerce")
-        except Exception:
-            df["Date_Time"] = pd.to_datetime("today")
-    else:
-        df["Date_Time"] = [datetime.today() - timedelta(minutes=i) for i in range(len(df))]
-
-    # --- Assign Station_ID ---
-    if station_col:
-        df["Station_ID"] = df[station_col].astype(str).fillna("CT")
-    else:
-        df["Station_ID"] = "CT"
-
-    # --- Detect numeric columns for dynamic PCode mapping ---
-    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-
-    # If no numeric columns, use any detected "Result" or create dummy
-    if not numeric_cols and result_col:
-        numeric_cols = [result_col]
-    elif not numeric_cols:
-        # If truly nothing numeric, create one dummy numeric column
-        df["Random_Result"] = np.random.uniform(0, 100, size=len(df))
-        numeric_cols = ["Random_Result"]
-
-    # --- Melt into PCode / Result structure ---
-    df_melted = df.melt(
-        id_vars=["Station_ID", "Date_Time"],
-        value_vars=numeric_cols,
-        var_name="PCode",
-        value_name="Result"
+def normalize_columns(df):
+    """Standardize column names: strip, replace spaces, remove symbols."""
+    df.columns = (
+        df.columns.str.strip()
+        .str.replace(r"[^0-9a-zA-Z]+", "_", regex=True)
+        .str.strip("_")
     )
+    return df
 
-    # Clean up
-    df_melted["PCode"] = df_melted["PCode"].astype(str).fillna("X1")
-    df_melted["Result"] = pd.to_numeric(df_melted["Result"], errors="coerce").fillna(0)
+def ensure_datetime_column(df):
+    """Ensure 'Date_Time' column exists."""
+    if "Date_Time" in df.columns:
+        return df
 
-    # --- Save normalized CSV ---
-    out_path = str(path) + ".normalized.csv"
-    df_melted.to_csv(out_path, index=False)
+    # Detect possible date/time columns
+    candidates = [c for c in df.columns if any(x in c.lower() for x in ["date", "time", "timestamp", "created", "datetime"])]
+    if candidates:
+        chosen = candidates[0]
+        try:
+            df["Date_Time"] = pd.to_datetime(df[chosen], errors="coerce")
+        except Exception:
+            df["Date_Time"] = pd.to_datetime(df[chosen].astype(str), errors="coerce")
+        print(f"✅ Mapped '{chosen}' → 'Date_Time'", file=sys.stderr)
+    else:
+        df["Date_Time"] = pd.date_range("2025-01-01", periods=len(df), freq="H")
+        print("⚠️ No timestamp column found; synthetic 'Date_Time' created.", file=sys.stderr)
 
-    return out_path
+    df = df[df["Date_Time"].notna()]
+    return df
 
+def ensure_required_columns(df):
+    """Add any missing required columns with default placeholders."""
+    for col in REQUIRED_COLUMNS:
+        if col not in df.columns:
+            df[col] = "Unknown"
+            print(f"⚠️ Missing column '{col}' — added placeholder values.", file=sys.stderr)
+    return df
 
-if __name__ == "__main__":
+def clean_numeric_columns(df):
+    """Convert currency / numeric columns to float where possible."""
+    for c in df.columns:
+        if df[c].dtype == object:
+            try:
+                df[c] = (
+                    df[c]
+                    .astype(str)
+                    .str.replace(",", "")
+                    .str.replace("₹", "")
+                    .str.replace("$", "")
+                    .str.replace("%", "")
+                    .str.strip()
+                )
+                # Convert to float if numeric
+                df[c] = pd.to_numeric(df[c], errors="ignore")
+            except Exception:
+                continue
+    return df
+
+def preprocess_file(path):
+    """Load, clean, and save preprocessed data."""
+    ext = Path(path).suffix.lower()
+    if ext not in [".csv", ".xlsx", ".xls"]:
+        raise ValueError(f"Unsupported file type: {ext}")
+
+    if ext == ".csv":
+        df = pd.read_csv(path)
+    else:
+        df = pd.read_excel(path, engine="openpyxl")
+
+    df = normalize_columns(df)
+    df = ensure_datetime_column(df)
+    df = clean_numeric_columns(df)
+    df = ensure_required_columns(df)
+
+    df.dropna(axis=0, how="all", inplace=True)
+    df.dropna(axis=1, how="all", inplace=True)
+
+    cleaned_path = Path("uploads") / (Path(path).stem + "_cleaned.csv")
+    os.makedirs(cleaned_path.parent, exist_ok=True)
+    df.to_csv(cleaned_path, index=False)
+
+    print(cleaned_path)  # web_app.py reads this stdout
+    return cleaned_path
+
+def main():
     if len(sys.argv) < 2:
-        print("Usage: python preprocess_upload.py <path>")
+        print("Usage: python3 preprocess_upload.py <path_to_file>", file=sys.stderr)
+        sys.exit(1)
+
+    file_path = sys.argv[1]
+    if not os.path.exists(file_path):
+        print(f"❌ File not found: {file_path}", file=sys.stderr)
         sys.exit(2)
 
-    path = sys.argv[1]
     try:
-        out = normalize_any_file(path)
-        print(out)
+        preprocess_file(file_path)
     except Exception as e:
-        print(path)
+        print(f"❌ Error during preprocessing: {e}", file=sys.stderr)
+        sys.exit(3)
+
+if __name__ == "__main__":
+    main()
