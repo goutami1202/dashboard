@@ -308,10 +308,10 @@ INDEX_HTML = """
                 </div>
             </div>
 
-            {% if dataset_type %}
+            {% if dataset_types %}
             <div class="dataset-info" style="background: #e8f5e8; padding: 20px; margin: 20px 0; border-radius: 10px; border-left: 4px solid #27ae60;">
-                <h3>🎯 Dataset Detected: {{ dataset_type.replace('_', ' ').title() }}</h3>
-                <p>Your uploaded file has been analyzed and matched to the most relevant dashboard type.</p>
+                <h3>🎯 Dataset Detected: {{ dataset_types|join(', ')|replace('_', ' ')|title }}</h3>
+                <p>Your uploaded file has been analyzed and matched to the most relevant dashboard types.</p>
             </div>
             {% endif %}
 
@@ -325,14 +325,43 @@ INDEX_HTML = """
                         <span class="{% if job.status == 'done' %}success{% elif job.status == 'failed' %}error{% elif job.status == 'queued' %}queued{% elif job.status == 'running' %}running{% endif %}">
                             {{ job.status|title }}
                         </span>
-                        {% if job.dataset_type and job.dataset_type != 'unknown' %}
-                        <span style="color: #666; font-size: 0.9em;">({{ job.dataset_type.replace('_', ' ').title() }})</span>
+                        {% if job.dataset_types and job.dataset_types|length > 0 %}
+                        <span style="color: #666; font-size: 0.9em;">({{ job.dataset_types|join(', ')|replace('_', ' ')|title }})</span>
                         {% endif %}
                     </div>
                     <a href="/job-page/{{ job.job_id }}" class="btn">View Details</a>
                 </div>
                 {% endfor %}
             </div>
+            {% endif %}
+
+            {% if jobs %}
+            {% for job in jobs %}
+            {% if job.status == 'done' and job.output_files and job.output_files|length > 0 %}
+            <div class="upload-results" style="background: #f0f8ff; padding: 20px; margin: 20px 0; border-radius: 10px; border-left: 4px solid #3498db;">
+                <h3>📁 Your Upload Results - Job {{ job.job_id }}</h3>
+                <p style="color: #666; margin-bottom: 15px;">Files generated from your upload: {{ job.original_filename }}</p>
+                {% for file in job.output_files %}
+                <div class="output-item" style="background: white; padding: 15px; margin: 10px 0; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <strong>{{ file }}</strong>
+                        {% if file.endswith('.html') %}
+                        <span style="color: #27ae60;">📈 Dashboard</span>
+                        {% else %}
+                        <span style="color: #3498db;">📄 Data File</span>
+                        {% endif %}
+                    </div>
+                    <div>
+                        {% if file.endswith('.html') %}
+                        <a href="/view/{{ file }}" class="btn">View</a>
+                        {% endif %}
+                        <a href="/outputs/{{ file }}" class="btn btn-success">Download</a>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+            {% endfor %}
             {% endif %}
 
             {% if outputs %}
@@ -359,20 +388,29 @@ INDEX_HTML = """
             </div>
             {% endif %}
 
-            {% if dashboard %}
+            {% if dashboards and dashboards|length > 0 %}
             <div class="dashboard-viewer">
-                <h3>📈 Relevant Dashboard: {{ dashboard }}</h3>
+                <h3>📈 Relevant Dashboards</h3>
                 <p style="color: #666; margin-bottom: 20px;">
-                    {% if dataset_type %}
-                    Showing dashboard for {{ dataset_type.replace('_', ' ').title() }} data type
+                    {% if dataset_types %}
+                    Showing dashboards for {{ dataset_types|join(', ')|replace('_', ' ')|title }} data types
                     {% else %}
                     Dashboard preview
                     {% endif %}
                 </p>
-                <iframe src="/view/{{ dashboard }}" style="width: 100%; height: 600px; border: none; border-radius: 8px;"></iframe>
-                <div style="text-align: center; margin-top: 15px;">
-                    <a href="/view/{{ dashboard }}" class="btn" target="_blank">Open in New Tab</a>
-                    <a href="/outputs/{{ dashboard }}" class="btn btn-success">Download Dashboard</a>
+                <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                    {% for dashboard in dashboards %}
+                    <div style="flex: 1; min-width: 400px; border: 1px solid #ddd; border-radius: 8px; overflow: hidden;">
+                        <div style="background: #f8f9fa; padding: 15px; border-bottom: 1px solid #ddd;">
+                            <h4 style="margin: 0; color: #2c3e50;">{{ dashboard }}</h4>
+                        </div>
+                        <iframe src="/view/{{ dashboard }}" style="width: 100%; height: 500px; border: none;"></iframe>
+                        <div style="text-align: center; padding: 15px; background: #f8f9fa;">
+                            <a href="/view/{{ dashboard }}" class="btn" target="_blank">Open in New Tab</a>
+                            <a href="/outputs/{{ dashboard }}" class="btn btn-success">Download</a>
+                        </div>
+                    </div>
+                    {% endfor %}
                 </div>
             </div>
             {% endif %}
@@ -409,14 +447,7 @@ INDEX_HTML = """
             document.getElementById('uploadButton').disabled = true;
             document.getElementById('uploadButton').textContent = 'Processing...';
             
-            // Reset form after successful submission (prevent stuck state)
-            setTimeout(function() {
-                document.getElementById('uploadForm').reset();
-                document.getElementById('fileName').textContent = '';
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('uploadButton').disabled = false;
-                document.getElementById('uploadButton').textContent = 'Upload & Process';
-            }, 2000);
+            // Form will reset naturally after page reload from redirect
         });
 
         // Auto-refresh job status every 5 seconds
@@ -444,7 +475,7 @@ def safe_get_job(job_id):
 def detect_dataset_type(file_path):
     """
     Detect dataset type based on column names and content similarity.
-    Returns: 'ct_analysis', 'tus_analysis', 'raw_data', or 'unknown'
+    Returns: List of matching types ['ct_analysis', 'tus_analysis', 'raw_data'] or ['unknown']
     """
     try:
         import pandas as pd
@@ -492,53 +523,77 @@ def detect_dataset_type(file_path):
         
         logger.info("Dataset detection scores - CT: %d, TUS: %d, Raw: %d", ct_score, tus_score, raw_score)
         
-        # Return the type with highest score
-        if ct_score >= tus_score and ct_score >= raw_score and ct_score > 0:
-            return 'ct_analysis'
-        elif tus_score >= raw_score and tus_score > 0:
-            return 'tus_analysis'
-        elif raw_score > 0:
-            return 'raw_data'
-        else:
-            return 'unknown'
+        # Return all types with scores above threshold (score >= 3)
+        matching_types = []
+        if ct_score >= 3:
+            matching_types.append('ct_analysis')
+        if tus_score >= 3:
+            matching_types.append('tus_analysis')
+        if raw_score >= 3:
+            matching_types.append('raw_data')
+        
+        # If no types meet threshold, return the highest scoring one or unknown
+        if not matching_types:
+            if ct_score >= tus_score and ct_score >= raw_score and ct_score > 0:
+                matching_types = ['ct_analysis']
+            elif tus_score >= raw_score and tus_score > 0:
+                matching_types = ['tus_analysis']
+            elif raw_score > 0:
+                matching_types = ['raw_data']
+            else:
+                matching_types = ['unknown']
+        
+        return matching_types
             
     except Exception as e:
         logger.exception("Error detecting dataset type: %s", e)
-        return 'unknown'
+        return ['unknown']
 
 
-def get_relevant_dashboard(dataset_type):
+def get_relevant_dashboards(dataset_types):
     """
-    Get the most relevant dashboard for the detected dataset type.
+    Get the most relevant dashboards for the detected dataset types.
+    Returns list of dashboard filenames.
     """
     try:
         outputs = sorted(os.listdir(OUTPUT_FOLDER)) if os.path.exists(OUTPUT_FOLDER) else []
+        dashboards = []
         
-        if dataset_type == 'ct_analysis':
-            # Look for CT analysis related files
-            ct_files = [f for f in outputs if 'ct' in f.lower() or 'analysis' in f.lower()]
-            if ct_files:
-                return ct_files[0]
-        elif dataset_type == 'tus_analysis':
-            # Look for TUS analysis related files
-            tus_files = [f for f in outputs if 'tus' in f.lower() or 'test' in f.lower()]
-            if tus_files:
-                return tus_files[0]
-        elif dataset_type == 'raw_data':
-            # Look for general dashboard or raw data files
-            dashboard_files = [f for f in outputs if f.endswith('.html')]
-            if dashboard_files:
-                return dashboard_files[0]
+        for dataset_type in dataset_types:
+            if dataset_type == 'ct_analysis':
+                # Look for CT analysis related HTML files
+                ct_files = [f for f in outputs if ('ct' in f.lower() or 'analysis' in f.lower()) and f.endswith('.html')]
+                if ct_files:
+                    dashboards.extend(ct_files)
+            elif dataset_type == 'tus_analysis':
+                # Look for TUS analysis related HTML files
+                tus_files = [f for f in outputs if ('tus' in f.lower() or 'test' in f.lower()) and f.endswith('.html')]
+                if tus_files:
+                    dashboards.extend(tus_files)
+            elif dataset_type == 'raw_data':
+                # Look for general dashboard files
+                dashboard_files = [f for f in outputs if f.endswith('.html')]
+                if dashboard_files:
+                    dashboards.extend(dashboard_files)
         
-        # Fallback to any HTML dashboard
-        html_files = [f for f in outputs if f.endswith('.html')]
-        if html_files:
-            return html_files[0]
-            
-        return None
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_dashboards = []
+        for dashboard in dashboards:
+            if dashboard not in seen:
+                seen.add(dashboard)
+                unique_dashboards.append(dashboard)
+        
+        # If no specific matches found, return any HTML dashboard as fallback
+        if not unique_dashboards:
+            html_files = [f for f in outputs if f.endswith('.html')]
+            if html_files:
+                unique_dashboards = [html_files[0]]  # Return first available dashboard
+        
+        return unique_dashboards
     except Exception as e:
-        logger.exception("Error getting relevant dashboard: %s", e)
-        return None
+        logger.exception("Error getting relevant dashboards: %s", e)
+        return []
 
 # ----------------------
 # Background worker implementation
@@ -551,12 +606,20 @@ def worker_thread():
             logger.info("Worker received shutdown signal")
             break
         job_id, uploaded_path = job
+        job_info = safe_get_job(job_id)
+        original_filename = job_info.get("original_filename", "unknown")
+        
         safe_set_job(job_id, status="running", started_at=datetime.utcnow().isoformat(), uploaded_path=uploaded_path)
         logger.info("Job %s: starting processing for %s", job_id, uploaded_path)
 
         try:
-            # process_data_fintech.py
-            cmd = ["python3", "process_data_fintech.py", "--raw", uploaded_path, "--out_dir", OUTPUT_FOLDER]
+            # Generate unique output filenames
+            ct_output = f"{original_filename}_{job_id}_CT_Analysis_Output.csv"
+            tus_output = f"{original_filename}_{job_id}_TUS_Analysis_Output.csv"
+            
+            # process_data_fintech.py with custom output filenames
+            cmd = ["python3", "process_data_fintech.py", "--raw", uploaded_path, "--out_dir", OUTPUT_FOLDER,
+                   "--ct_out", ct_output, "--tus_out", tus_output]
             logger.info("Job %s: executing: %s", job_id, " ".join(cmd))
             proc = subprocess.run(cmd, cwd=".", capture_output=True, text=True, timeout=3600)
             safe_set_job(job_id, proc_returncode=proc.returncode, proc_stdout=(proc.stdout or "")[:20000], proc_stderr=(proc.stderr or "")[:20000])
@@ -577,9 +640,24 @@ def worker_thread():
                 processing_queue.task_done()
                 continue
 
+            # Collect generated output files
+            output_files = []
+            ct_path = os.path.join(OUTPUT_FOLDER, ct_output)
+            tus_path = os.path.join(OUTPUT_FOLDER, tus_output)
+            
+            if os.path.exists(ct_path):
+                output_files.append(ct_output)
+            if os.path.exists(tus_path):
+                output_files.append(tus_output)
+            
+            # Check for any HTML dashboard files generated
+            for file in os.listdir(OUTPUT_FOLDER):
+                if file.endswith('.html') and job_id in file:
+                    output_files.append(file)
+
             # success
-            safe_set_job(job_id, status="done", finished_at=datetime.utcnow().isoformat())
-            logger.info("Job %s: completed successfully", job_id)
+            safe_set_job(job_id, status="done", finished_at=datetime.utcnow().isoformat(), output_files=output_files)
+            logger.info("Job %s: completed successfully, generated files: %s", job_id, output_files)
         except subprocess.TimeoutExpired as t:
             logger.exception("Job %s: timeout", job_id)
             safe_set_job(job_id, status="failed", finished_at=datetime.utcnow().isoformat(), error=f"timeout: {t}")
@@ -666,26 +744,35 @@ def health():
 
 @app.route("/", methods=["GET"])
 def index():
-    dashboard = request.args.get("dashboard", default=None)
-    dataset_type = request.args.get("dataset_type", default=None)
+    dashboards_param = request.args.get("dashboards", default=None)
+    dataset_types_param = request.args.get("dataset_types", default=None)
     outputs = sorted(os.listdir(app.config["OUTPUT_FOLDER"])) if os.path.exists(app.config["OUTPUT_FOLDER"]) else []
     
     with jobs_lock:
         jobs_list = [
-            {"job_id": k, "status": v.get("status", "unknown"), "dataset_type": v.get("dataset_type", "unknown")}
+            {"job_id": k, "status": v.get("status", "unknown"), "dataset_types": v.get("dataset_types", []), 
+             "original_filename": v.get("original_filename", ""), "output_files": v.get("output_files", [])}
             for k, v in sorted(jobs.items(), key=lambda it: it[1].get("started_at", ""))
         ]
     
-    # Validate dashboard exists
-    if dashboard and dashboard not in outputs:
-        dashboard = None
+    # Parse dashboards and dataset types from URL parameters
+    dashboards = []
+    if dashboards_param:
+        dashboards = [d.strip() for d in dashboards_param.split(",") if d.strip()]
     
-    # If no dashboard specified but we have dataset_type, try to find relevant dashboard
-    if not dashboard and dataset_type:
-        dashboard = get_relevant_dashboard(dataset_type)
+    dataset_types = []
+    if dataset_types_param:
+        dataset_types = [d.strip() for d in dataset_types_param.split(",") if d.strip()]
     
-    return render_template_string(INDEX_HTML, outputs=outputs, dashboard=dashboard, 
-                                 jobs=jobs_list, dataset_type=dataset_type)
+    # Validate dashboards exist
+    dashboards = [d for d in dashboards if d in outputs]
+    
+    # If no dashboards specified but we have dataset_types, try to find relevant dashboards
+    if not dashboards and dataset_types:
+        dashboards = get_relevant_dashboards(dataset_types)
+    
+    return render_template_string(INDEX_HTML, outputs=outputs, dashboards=dashboards, 
+                                 jobs=jobs_list, dataset_types=dataset_types)
 
 
 def allowed_file(filename):
@@ -729,26 +816,30 @@ def upload():
     except Exception as e:
         logger.exception("Preprocessing failed; continuing with original file: %s", e)
 
-    # Detect dataset type and get relevant dashboard
-    dataset_type = detect_dataset_type(saved_path)
-    relevant_dashboard = get_relevant_dashboard(dataset_type)
+    # Detect dataset types and get relevant dashboards
+    dataset_types = detect_dataset_type(saved_path)
+    relevant_dashboards = get_relevant_dashboards(dataset_types)
     
-    logger.info("Detected dataset type: %s, Relevant dashboard: %s", dataset_type, relevant_dashboard)
+    logger.info("Detected dataset types: %s, Relevant dashboards: %s", dataset_types, relevant_dashboards)
+    
+    # Store original filename for unique output naming
+    original_filename = Path(file.filename).stem
     
     # enqueue job
     job_id = uuid.uuid4().hex[:8]
     safe_set_job(job_id, status="queued", uploaded_at=datetime.utcnow().isoformat(), 
-                 uploaded_path=saved_path, dataset_type=dataset_type)
+                 uploaded_path=saved_path, dataset_types=dataset_types, original_filename=original_filename)
     processing_queue.put((job_id, saved_path))
     
     # Flash message with dataset type info
-    flash(f"Upload accepted! Detected: {dataset_type.replace('_', ' ').title()} data. Job queued (id={job_id})")
+    types_str = ", ".join([t.replace('_', ' ').title() for t in dataset_types])
+    flash(f"Upload accepted! Detected: {types_str} data. Job queued (id={job_id})")
     
-    # Redirect to index with dashboard parameter if relevant dashboard found
-    if relevant_dashboard:
-        return redirect(url_for("index", dashboard=relevant_dashboard, dataset_type=dataset_type))
+    # Redirect to index with dashboards parameter
+    if relevant_dashboards:
+        return redirect(url_for("index", dashboards=",".join(relevant_dashboards), dataset_types=",".join(dataset_types)))
     else:
-        return redirect(url_for("index", dataset_type=dataset_type))
+        return redirect(url_for("index", dataset_types=",".join(dataset_types)))
 
 
 @app.route("/job/<job_id>", methods=["GET"])
@@ -790,8 +881,21 @@ def view_dashboard(filename):
     path = os.path.join(app.config["OUTPUT_FOLDER"], filename)
     if not os.path.exists(path):
         abort(404)
+    
+    # Only serve HTML files in iframe, return message for CSV files
     if not filename.endswith(".html"):
-        return redirect(url_for("download_output", filename=filename))
+        return f"""
+        <!DOCTYPE html>
+        <html>
+        <head><title>File Preview</title></head>
+        <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+            <h3>📄 {filename}</h3>
+            <p>CSV files cannot be previewed in the browser.</p>
+            <p>Please use the download button to view the file.</p>
+            <a href="/outputs/{filename}" style="background: #3498db; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Download File</a>
+        </body>
+        </html>
+        """
     
     # Read the HTML content directly
     try:
