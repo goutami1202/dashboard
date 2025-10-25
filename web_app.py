@@ -11,7 +11,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 app = Flask(__name__)
-app.secret_key = "change-me-123"
+app.secret_key = os.environ.get("SECRET_KEY", "dev-secret")
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['OUTPUT_FOLDER'] = OUTPUT_FOLDER
 
@@ -271,4 +271,5 @@ def view_dashboard(filename):
 
 if __name__ == "__main__":
     # start server
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=5000, debug=False)
