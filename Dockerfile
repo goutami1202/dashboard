@@ -1,0 +1,24 @@
+
+FROM python:3.11-slim
+
+# create app user
+RUN groupadd -r app && useradd -r -g app app
+
+WORKDIR /home/app
+
+# copy requirements if present
+COPY requirements.txt /home/app/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# copy project
+COPY . /home/app
+RUN chown -R app:app /home/app
+USER app
+
+ENV FLASK_APP=web_app.py
+EXPOSE 5000
+
+# create runtime folders
+RUN mkdir -p /home/app/uploads /home/app/outputs
+
+ENTRYPOINT ["python", "web_app.py"]
