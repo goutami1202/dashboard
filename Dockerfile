@@ -21,5 +21,5 @@ EXPOSE 5000
 # create runtime folders
 RUN mkdir -p /home/app/uploads /home/app/outputs
 
-ENTRYPOINT ["python", "web_app.py"]
+#ENTRYPOINT ["python", "web_app.py"]
 CMD ["gunicorn", "-w", "1", "-b", "0.0.0.0:5000", "web_app:app", "--timeout", "300", "--log-level", "info"]
