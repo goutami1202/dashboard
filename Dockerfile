@@ -20,5 +20,6 @@ EXPOSE 5000
 
 # create runtime folders
 RUN mkdir -p /home/app/uploads /home/app/outputs
+RUN pip install --no-cache-dir -r requirements.txt
 
 ENTRYPOINT ["python", "web_app.py"]
