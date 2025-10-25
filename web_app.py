@@ -91,11 +91,6 @@ jobs = {}
 jobs_lock = threading.Lock()
 
 # ----------------------
-# Start background worker
-# ----------------------
-start_background_worker_once_with_pidfile()
-
-# ----------------------
 # HTML Template
 # ----------------------
 INDEX_HTML = """
@@ -285,6 +280,12 @@ def start_background_worker_once_with_pidfile():
     except Exception as exc:
         logger.exception("Failed to start background worker: %s", exc)
         return False
+
+# ----------------------
+# Start background worker
+# ----------------------
+start_background_worker_once_with_pidfile()
+
 # ----------------------
 # Routes & helpers
 # ----------------------
