@@ -423,15 +423,6 @@ INDEX_HTML = """
     </div>
 
     <script>
-        // Reset form on page load to ensure clean state
-        document.addEventListener('DOMContentLoaded', function() {
-            document.getElementById('uploadForm').reset();
-            document.getElementById('fileName').textContent = '';
-            document.getElementById('loading').style.display = 'none';
-            document.getElementById('uploadButton').disabled = false;
-            document.getElementById('uploadButton').textContent = 'Upload & Process';
-        });
-
         // File input handling
         document.getElementById('fileInput').addEventListener('change', function(e) {
             const fileName = e.target.files[0]?.name || 'No file chosen';
@@ -459,9 +450,10 @@ INDEX_HTML = """
             // Form will reset naturally after page reload from redirect
         });
 
-        // Auto-refresh job status every 5 seconds
+        // Auto-refresh job status every 5 seconds (only if there are running/queued jobs)
         setInterval(function() {
-            if (document.querySelector('.job-status')) {
+            const runningJobs = document.querySelectorAll('.job-item .running, .job-item .queued');
+            if (runningJobs.length > 0) {
                 location.reload();
             }
         }, 5000);
@@ -568,22 +560,31 @@ def get_relevant_dashboards(dataset_types):
         outputs = sorted(os.listdir(OUTPUT_FOLDER)) if os.path.exists(OUTPUT_FOLDER) else []
         dashboards = []
         
-        for dataset_type in dataset_types:
-            if dataset_type == 'ct_analysis':
-                # Look for CT analysis related HTML files
-                ct_files = [f for f in outputs if ('ct' in f.lower() or 'analysis' in f.lower()) and f.endswith('.html')]
-                if ct_files:
-                    dashboards.extend(ct_files)
-            elif dataset_type == 'tus_analysis':
-                # Look for TUS analysis related HTML files
-                tus_files = [f for f in outputs if ('tus' in f.lower() or 'test' in f.lower()) and f.endswith('.html')]
-                if tus_files:
-                    dashboards.extend(tus_files)
-            elif dataset_type == 'raw_data':
-                # Look for general dashboard files
-                dashboard_files = [f for f in outputs if f.endswith('.html')]
-                if dashboard_files:
-                    dashboards.extend(dashboard_files)
+        # First, look for job-specific dashboards (most recent)
+        job_dashboards = [f for f in outputs if f.endswith('.html') and '_' in f and f.count('_') >= 2]
+        if job_dashboards:
+            # Sort by modification time, most recent first
+            job_dashboards.sort(key=lambda x: os.path.getmtime(os.path.join(OUTPUT_FOLDER, x)), reverse=True)
+            dashboards.extend(job_dashboards[:2])  # Take up to 2 most recent job dashboards
+        
+        # If no job-specific dashboards, look for type-specific ones
+        if not dashboards:
+            for dataset_type in dataset_types:
+                if dataset_type == 'ct_analysis':
+                    # Look for CT analysis related HTML files
+                    ct_files = [f for f in outputs if ('ct' in f.lower() or 'analysis' in f.lower()) and f.endswith('.html')]
+                    if ct_files:
+                        dashboards.extend(ct_files)
+                elif dataset_type == 'tus_analysis':
+                    # Look for TUS analysis related HTML files
+                    tus_files = [f for f in outputs if ('tus' in f.lower() or 'test' in f.lower()) and f.endswith('.html')]
+                    if tus_files:
+                        dashboards.extend(tus_files)
+                elif dataset_type == 'raw_data':
+                    # Look for general dashboard files
+                    dashboard_files = [f for f in outputs if f.endswith('.html')]
+                    if dashboard_files:
+                        dashboards.extend(dashboard_files)
         
         # Remove duplicates while preserving order
         seen = set()
@@ -597,7 +598,9 @@ def get_relevant_dashboards(dataset_types):
         if not unique_dashboards:
             html_files = [f for f in outputs if f.endswith('.html')]
             if html_files:
-                unique_dashboards = [html_files[0]]  # Return first available dashboard
+                # Sort by modification time, most recent first
+                html_files.sort(key=lambda x: os.path.getmtime(os.path.join(OUTPUT_FOLDER, x)), reverse=True)
+                unique_dashboards = [html_files[0]]  # Return most recent dashboard
         
         return unique_dashboards
     except Exception as e:
@@ -638,8 +641,13 @@ def worker_thread():
                 processing_queue.task_done()
                 continue
 
-            # generate_dashboard.py
-            cmd2 = ["python3", "generate_dashboard.py"]
+            # generate_dashboard.py with custom parameters
+            dashboard_output = f"{original_filename}_{job_id}_dashboard.html"
+            cmd2 = ["python3", "generate_dashboard.py",
+                   "--ct_input", ct_output,
+                   "--tus_input", tus_output,
+                   "--output", dashboard_output,
+                   "--out_dir", OUTPUT_FOLDER]
             logger.info("Job %s: executing: %s", job_id, " ".join(cmd2))
             proc2 = subprocess.run(cmd2, cwd=".", capture_output=True, text=True, timeout=300)
             safe_set_job(job_id, gen_returncode=proc2.returncode, gen_stdout=(proc2.stdout or "")[:20000], gen_stderr=(proc2.stderr or "")[:20000])
@@ -653,8 +661,9 @@ def worker_thread():
             output_files = []
             ct_path = os.path.join(OUTPUT_FOLDER, ct_output)
             tus_path = os.path.join(OUTPUT_FOLDER, tus_output)
+            dashboard_path = os.path.join(OUTPUT_FOLDER, dashboard_output)
             
-            logger.info("Job %s: Checking for output files - CT: %s, TUS: %s", job_id, ct_path, tus_path)
+            logger.info("Job %s: Checking for output files - CT: %s, TUS: %s, Dashboard: %s", job_id, ct_path, tus_path, dashboard_path)
             
             if os.path.exists(ct_path):
                 output_files.append(ct_output)
@@ -668,12 +677,18 @@ def worker_thread():
             else:
                 logger.warning("Job %s: TUS output file not found: %s", job_id, tus_path)
             
-            # Check for any HTML dashboard files generated
+            if os.path.exists(dashboard_path):
+                output_files.append(dashboard_output)
+                logger.info("Job %s: Found dashboard HTML: %s", job_id, dashboard_output)
+            else:
+                logger.warning("Job %s: Dashboard HTML not found: %s", job_id, dashboard_path)
+            
+            # Check for any other HTML dashboard files generated
             try:
                 for file in os.listdir(OUTPUT_FOLDER):
-                    if file.endswith('.html') and job_id in file:
+                    if file.endswith('.html') and job_id in file and file != dashboard_output:
                         output_files.append(file)
-                        logger.info("Job %s: Found HTML dashboard: %s", job_id, file)
+                        logger.info("Job %s: Found additional HTML dashboard: %s", job_id, file)
             except Exception as e:
                 logger.exception("Job %s: Error listing output directory: %s", job_id, e)
             
