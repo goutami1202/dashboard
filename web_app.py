@@ -271,4 +271,6 @@ def view_dashboard(filename):
 
 if __name__ == "__main__":
     # start server
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    import os
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=5000, debug=False)
