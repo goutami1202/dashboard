@@ -9,3 +9,4 @@ pyyaml>=6.0
 ruff>=0.4.0
 bandit>=1.7.5
 flask
+gunicorn
