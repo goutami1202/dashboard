@@ -27,4 +27,4 @@ ENV PORT=5000
 EXPOSE 5000
 
 # Use Gunicorn to serve app in production (3 workers)
-CMD ["gunicorn", "-w", "3", "-b", "0.0.0.0:5000", "web_app:app"]
+CMD ["gunicorn", "-w", "3", "-b", "0.0.0.0:5000", "web_app:app", "--timeout", "120"]
