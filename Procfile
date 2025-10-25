@@ -1,0 +1,1 @@
+web: gunicorn -w 1 -b 0.0.0.0:$PORT web_app:app --timeout 300 --log-level info
