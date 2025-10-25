@@ -167,6 +167,10 @@ INDEX_HTML = """
 </html>
 """
 
+@app.route("/health")
+def health():
+    return "OK", 200
+
 @app.route("/", methods=["GET"])
 def index():
     # `dashboard` can be passed as query parameter to show specific file inline
