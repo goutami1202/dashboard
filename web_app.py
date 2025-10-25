@@ -308,6 +308,13 @@ INDEX_HTML = """
                 </div>
             </div>
 
+            {% if dataset_type %}
+            <div class="dataset-info" style="background: #e8f5e8; padding: 20px; margin: 20px 0; border-radius: 10px; border-left: 4px solid #27ae60;">
+                <h3>🎯 Dataset Detected: {{ dataset_type.replace('_', ' ').title() }}</h3>
+                <p>Your uploaded file has been analyzed and matched to the most relevant dashboard type.</p>
+            </div>
+            {% endif %}
+
             {% if jobs %}
             <div class="job-status">
                 <h3>⚡ Recent Jobs</h3>
@@ -318,6 +325,9 @@ INDEX_HTML = """
                         <span class="{% if job.status == 'done' %}success{% elif job.status == 'failed' %}error{% elif job.status == 'queued' %}queued{% elif job.status == 'running' %}running{% endif %}">
                             {{ job.status|title }}
                         </span>
+                        {% if job.dataset_type and job.dataset_type != 'unknown' %}
+                        <span style="color: #666; font-size: 0.9em;">({{ job.dataset_type.replace('_', ' ').title() }})</span>
+                        {% endif %}
                     </div>
                     <a href="/job-page/{{ job.job_id }}" class="btn">View Details</a>
                 </div>
@@ -351,8 +361,19 @@ INDEX_HTML = """
 
             {% if dashboard %}
             <div class="dashboard-viewer">
-                <h3>📈 Current Dashboard: {{ dashboard }}</h3>
+                <h3>📈 Relevant Dashboard: {{ dashboard }}</h3>
+                <p style="color: #666; margin-bottom: 20px;">
+                    {% if dataset_type %}
+                    Showing dashboard for {{ dataset_type.replace('_', ' ').title() }} data type
+                    {% else %}
+                    Dashboard preview
+                    {% endif %}
+                </p>
                 <iframe src="/view/{{ dashboard }}"></iframe>
+                <div style="text-align: center; margin-top: 15px;">
+                    <a href="/view/{{ dashboard }}" class="btn" target="_blank">Open in New Tab</a>
+                    <a href="/outputs/{{ dashboard }}" class="btn btn-success">Download Dashboard</a>
+                </div>
             </div>
             {% endif %}
 
@@ -409,6 +430,106 @@ def safe_set_job(job_id, **kwargs):
 def safe_get_job(job_id):
     with jobs_lock:
         return jobs.get(job_id, {}).copy()
+
+
+def detect_dataset_type(file_path):
+    """
+    Detect dataset type based on column names and content similarity.
+    Returns: 'ct_analysis', 'tus_analysis', 'raw_data', or 'unknown'
+    """
+    try:
+        import pandas as pd
+        from pathlib import Path
+        
+        ext = Path(file_path).suffix.lower()
+        if ext == ".csv":
+            df = pd.read_csv(file_path)
+        else:
+            df = pd.read_excel(file_path, engine="openpyxl")
+        
+        # Normalize column names for comparison
+        columns = [col.lower().strip() for col in df.columns]
+        
+        # CT Analysis indicators
+        ct_indicators = [
+            'dates', 'date', 'timestamp', 'time',
+            'amount', 'transaction_amount', 'value', 'price',
+            'customer', 'client', 'account', 'user',
+            'transaction', 'payment', 'transfer',
+            'status', 'type', 'category'
+        ]
+        
+        # TUS Analysis indicators  
+        tus_indicators = [
+            'dates', 'date', 'timestamp', 'time',
+            'test', 'result', 'outcome', 'score',
+            'user', 'patient', 'subject', 'participant',
+            'analysis', 'evaluation', 'assessment',
+            'metric', 'measurement', 'value'
+        ]
+        
+        # Raw Data indicators
+        raw_indicators = [
+            'date_time', 'datetime', 'timestamp',
+            'amount', 'value', 'price', 'cost',
+            'description', 'details', 'notes',
+            'id', 'reference', 'code'
+        ]
+        
+        # Calculate similarity scores
+        ct_score = sum(1 for indicator in ct_indicators if any(indicator in col for col in columns))
+        tus_score = sum(1 for indicator in tus_indicators if any(indicator in col for col in columns))
+        raw_score = sum(1 for indicator in raw_indicators if any(indicator in col for col in columns))
+        
+        logger.info("Dataset detection scores - CT: %d, TUS: %d, Raw: %d", ct_score, tus_score, raw_score)
+        
+        # Return the type with highest score
+        if ct_score >= tus_score and ct_score >= raw_score and ct_score > 0:
+            return 'ct_analysis'
+        elif tus_score >= raw_score and tus_score > 0:
+            return 'tus_analysis'
+        elif raw_score > 0:
+            return 'raw_data'
+        else:
+            return 'unknown'
+            
+    except Exception as e:
+        logger.exception("Error detecting dataset type: %s", e)
+        return 'unknown'
+
+
+def get_relevant_dashboard(dataset_type):
+    """
+    Get the most relevant dashboard for the detected dataset type.
+    """
+    try:
+        outputs = sorted(os.listdir(OUTPUT_FOLDER)) if os.path.exists(OUTPUT_FOLDER) else []
+        
+        if dataset_type == 'ct_analysis':
+            # Look for CT analysis related files
+            ct_files = [f for f in outputs if 'ct' in f.lower() or 'analysis' in f.lower()]
+            if ct_files:
+                return ct_files[0]
+        elif dataset_type == 'tus_analysis':
+            # Look for TUS analysis related files
+            tus_files = [f for f in outputs if 'tus' in f.lower() or 'test' in f.lower()]
+            if tus_files:
+                return tus_files[0]
+        elif dataset_type == 'raw_data':
+            # Look for general dashboard or raw data files
+            dashboard_files = [f for f in outputs if f.endswith('.html')]
+            if dashboard_files:
+                return dashboard_files[0]
+        
+        # Fallback to any HTML dashboard
+        html_files = [f for f in outputs if f.endswith('.html')]
+        if html_files:
+            return html_files[0]
+            
+        return None
+    except Exception as e:
+        logger.exception("Error getting relevant dashboard: %s", e)
+        return None
 
 # ----------------------
 # Background worker implementation
@@ -537,15 +658,25 @@ def health():
 @app.route("/", methods=["GET"])
 def index():
     dashboard = request.args.get("dashboard", default=None)
+    dataset_type = request.args.get("dataset_type", default=None)
     outputs = sorted(os.listdir(app.config["OUTPUT_FOLDER"])) if os.path.exists(app.config["OUTPUT_FOLDER"]) else []
+    
     with jobs_lock:
         jobs_list = [
-            {"job_id": k, "status": v.get("status", "unknown")}
+            {"job_id": k, "status": v.get("status", "unknown"), "dataset_type": v.get("dataset_type", "unknown")}
             for k, v in sorted(jobs.items(), key=lambda it: it[1].get("started_at", ""))
         ]
+    
+    # Validate dashboard exists
     if dashboard and dashboard not in outputs:
         dashboard = None
-    return render_template_string(INDEX_HTML, outputs=outputs, dashboard=dashboard, jobs=jobs_list)
+    
+    # If no dashboard specified but we have dataset_type, try to find relevant dashboard
+    if not dashboard and dataset_type:
+        dashboard = get_relevant_dashboard(dataset_type)
+    
+    return render_template_string(INDEX_HTML, outputs=outputs, dashboard=dashboard, 
+                                 jobs=jobs_list, dataset_type=dataset_type)
 
 
 def allowed_file(filename):
@@ -589,12 +720,26 @@ def upload():
     except Exception as e:
         logger.exception("Preprocessing failed; continuing with original file: %s", e)
 
+    # Detect dataset type and get relevant dashboard
+    dataset_type = detect_dataset_type(saved_path)
+    relevant_dashboard = get_relevant_dashboard(dataset_type)
+    
+    logger.info("Detected dataset type: %s, Relevant dashboard: %s", dataset_type, relevant_dashboard)
+    
     # enqueue job
     job_id = uuid.uuid4().hex[:8]
-    safe_set_job(job_id, status="queued", uploaded_at=datetime.utcnow().isoformat(), uploaded_path=saved_path)
+    safe_set_job(job_id, status="queued", uploaded_at=datetime.utcnow().isoformat(), 
+                 uploaded_path=saved_path, dataset_type=dataset_type)
     processing_queue.put((job_id, saved_path))
-    flash(f"Upload accepted; job queued (id={job_id}). Check status at /job/{job_id}")
-    return redirect(url_for("index"))
+    
+    # Flash message with dataset type info
+    flash(f"Upload accepted! Detected: {dataset_type.replace('_', ' ').title()} data. Job queued (id={job_id})")
+    
+    # Redirect to index with dashboard parameter if relevant dashboard found
+    if relevant_dashboard:
+        return redirect(url_for("index", dashboard=relevant_dashboard, dataset_type=dataset_type))
+    else:
+        return redirect(url_for("index", dataset_type=dataset_type))
 
 
 @app.route("/job/<job_id>", methods=["GET"])

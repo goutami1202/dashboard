@@ -66,7 +66,10 @@ def clean_numeric_columns(df):
                     .str.strip()
                 )
                 # Convert to float if numeric
-                df[c] = pd.to_numeric(df[c], errors="ignore")
+                try:
+                    df[c] = pd.to_numeric(df[c])
+                except (ValueError, TypeError):
+                    pass  # Keep as string if conversion fails
             except Exception:
                 continue
     return df
