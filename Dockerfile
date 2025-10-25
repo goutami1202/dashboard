@@ -19,12 +19,12 @@ COPY . /home/app
 
 # Create runtime folders (and ensure writable permissions)
 RUN mkdir -p /home/app/uploads /home/app/outputs && \
-    chown -R root:root /home/app
+    chmod -R 755 /home/app
 
 ENV PYTHONUNBUFFERED=1
 ENV PORT=5000
 
 EXPOSE 5000
 
-# Use Gunicorn to serve app in production (3 workers)
-CMD ["gunicorn", "-w", "3", "-b", "0.0.0.0:5000", "web_app:app", "--timeout", "300"]
+# Use Gunicorn to serve app in production (1 worker for cloud platforms)
+CMD ["sh", "-c", "gunicorn -w 1 -b 0.0.0.0:${PORT:-5000} web_app:app --timeout 300 --preload"]

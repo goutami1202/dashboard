@@ -8,4 +8,7 @@ services:
     volumes:
       - ./uploads:/home/app/uploads
       - ./outputs:/home/app/outputs
+    environment:
+      - PORT=5000
+      - HOST=0.0.0.0
     restart: unless-stopped

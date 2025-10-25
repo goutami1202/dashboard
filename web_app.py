@@ -31,6 +31,31 @@ from flask import (
     abort,
     jsonify,
 )
+# ----------------------
+# Cloud Environment Detection
+# ----------------------
+def is_cloud_environment():
+    """Detect if running in a cloud environment"""
+    cloud_indicators = [
+        os.environ.get("RENDER"),
+        os.environ.get("RAILWAY_ENVIRONMENT"),
+        os.environ.get("HEROKU_APP_NAME"),
+        os.environ.get("DYNO"),  # Heroku
+        os.environ.get("PORT"),  # Most cloud platforms set this
+    ]
+    return any(cloud_indicators)
+
+# Adjust logging for cloud environments
+if is_cloud_environment():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s %(name)s - %(message)s",  # Simpler format for cloud logs
+    )
+else:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+    )
 
 # ----------------------
 # Configuration
@@ -38,8 +63,8 @@ from flask import (
 UPLOAD_FOLDER = "uploads"
 OUTPUT_FOLDER = "outputs"
 ALLOWED_EXT = {".csv", ".xlsx", ".xls"}
-PIDFILE = Path("/tmp/fintech_bg.pid")  # used to ensure single background worker
-
+# Use a writable directory instead of /tmp for cloud platforms
+PIDFILE = Path(os.path.join(os.getcwd(), "fintech_bg.pid"))
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
@@ -144,10 +169,14 @@ def start_background_worker_once_with_pidfile():
     """
     try:
         current_pid = os.getpid()
+        # Use a writable directory instead of /tmp
+        pid_dir = Path(os.getcwd())
+        pidfile_path = pid_dir / "fintech_bg.pid"
+        
         # If pidfile exists, check its PID
-        if PIDFILE.exists():
+        if pidfile_path.exists():
             try:
-                text = PIDFILE.read_text().strip()
+                text = pidfile_path.read_text().strip()
                 existing_pid = int(text) if text else None
             except Exception:
                 existing_pid = None
@@ -158,15 +187,18 @@ def start_background_worker_once_with_pidfile():
             else:
                 # stale pidfile; try to remove it
                 try:
-                    PIDFILE.unlink()
+                    pidfile_path.unlink()
                     logger.info("Removed stale pidfile; proceeding to start worker (this pid=%s)", current_pid)
                 except Exception as e:
                     logger.warning("Could not remove stale pidfile: %s", e)
 
         # Write our pid and start
         try:
-            PIDFILE.write_text(str(current_pid))
-            logger.info("Wrote pidfile %s -> %s", PIDFILE, current_pid)
+            pidfile_path.write_text(str(current_pid))
+            logger.info("Wrote pidfile %s -> %s", pidfile_path, current_pid)
+        except PermissionError as e:
+            logger.warning("Cannot create PID file due to permissions, continuing without worker coordination: %s", e)
+            return False
         except Exception as e:
             logger.warning("Could not write pidfile; continuing but duplicates may occur: %s", e)
 
@@ -178,16 +210,6 @@ def start_background_worker_once_with_pidfile():
     except Exception as exc:
         logger.exception("Failed to start background worker: %s", exc)
         return False
-
-# Try to start worker once at import time (safe in most setups)
-_start_result = start_background_worker_once_with_pidfile()
-
-# ----------------------
-# HTML template (kept compact)
-# ----------------------
-INDEX_HTML = """..."""  # keep the same HTML here (omitted in snippet for brevity)
-# For clarity, copy your previous full INDEX_HTML content here exactly (unchanged).
-
 # ----------------------
 # Routes & helpers
 # ----------------------
@@ -308,15 +330,17 @@ def shutdown_worker():
     processing_queue.put(None)
     # remove pidfile if we created it (best-effort)
     try:
-        if PIDFILE.exists():
-            PIDFILE.unlink()
+        pidfile_path = Path(os.path.join(os.getcwd(), "fintech_bg.pid"))
+        if pidfile_path.exists():
+            pidfile_path.unlink()
     except Exception:
         pass
-
 
 # ----------------------
 # Local run block (unused under Gunicorn)
 # ----------------------
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    host = os.environ.get("HOST", "0.0.0.0")
+    app.run(host=host, port=port, debug=False)
